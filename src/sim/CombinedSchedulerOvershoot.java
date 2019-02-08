@@ -15,13 +15,14 @@ import java.util.Set;
 import map.MapProcessor;
 import map.Utility;
 
-public class CombinedScheduler extends Items {
+public class CombinedSchedulerOvershoot extends Items {
 	static List<Cluster> initClusterList;
 	static Util.StreamMap streamMap;
 	static Utility.MyMap deviceMap;
 	static int sum;
 	static FileWriter traceWriter;
 	static String OUTFILE; 
+	static int sync_count = 0;
 
 	// extract devices and grid from map processor
 	public static void getDetailsFromMap() throws FileNotFoundException, IOException {
@@ -98,10 +99,11 @@ public class CombinedScheduler extends Items {
 				noneDevices = getAsyncMachines(getCurrentTimePoint());
 				// availMachineMap.sortByTime();
 				schdAsyncOrLocalC(i);
-				//dynamic_revised_available_time += dynamicInputMap.getValue(i) + 5;
+				dynamic_revised_available_time += dynamicInputMap.getValue(i) + 1;
+				average_time += dynamicInputMap.getValue(i);
 				time_point += dynamicInputMap.getValue(i);
 				for (int u = 0; u < noneDevices.size(); u++) {
-					noneDevices.get(u).increaseTime(dynamicInputMap.getValue(i));
+					noneDevices.get(u).setTime((int)average_time);
 				}
 			}
 
@@ -113,10 +115,11 @@ public class CombinedScheduler extends Items {
 				// availMachineMap.sortByTime();
 				JNode.setTime(Math.max(getMax(), JNode.getTime()));
 				schdAsyncOrLocalC(i);
-				//dynamic_revised_available_time += dynamicInputMap.getValue(i) + COMMUNICATION_TIME + 5;
+				dynamic_revised_available_time += dynamicInputMap.getValue(i) + COMMUNICATION_TIME + 1;
+				average_time += dynamicInputMap.getValue(i) + COMMUNICATION_TIME;
 				time_point += dynamicInputMap.getValue(i);
 				for (int u = 0; u < noneDevices.size(); u++) {
-					noneDevices.get(u).increaseTime((int) (dynamicInputMap.getValue(i) + COMMUNICATION_TIME));
+					noneDevices.get(u).setTime((int)average_time);
 				}
 			}
 
@@ -135,7 +138,7 @@ public class CombinedScheduler extends Items {
 				// update all devices to current point
 				// update JNode time
 				JNode.setTime(Math.max(getMax(), JNode.getTime()));
-				//dynamic_revised_available_time = Math.max(getMax(), JNode.getTime());
+				dynamic_revised_available_time = Math.max(getMax(), JNode.getTime());
 				
 				// clear ready device list for next iteration
 				readyMachines.clear();
@@ -363,10 +366,16 @@ public class CombinedScheduler extends Items {
 		for (Device ddd : noneDevices) {
 			ddd.setTime(Math.max(getReadyMax(), JNode.getTime()));
 		}
-
+		
 		if (isQuorum()) {
 			scheduleSync(clusterMachineMap, readyDevices, noneDevices, task_num);
 		} else {
+			//update this part for synchronization retries
+			if (sync_count < MAX_RETRIES) {
+				syncAvailUpdate(clusterMachineMap, noneDevices, task_num, task_num);
+				sync_count++;
+				syncAttempt++;
+			}
 			System.out.println("Sync task failed due to failed quorum, task number: " + (task_num + 1));
 			syncFail++;
 			readyMachines.clear();

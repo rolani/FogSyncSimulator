@@ -1,8 +1,6 @@
 package sim;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
@@ -11,6 +9,7 @@ import java.util.Set;
 //represents the fog class.
 public class Cluster {
 	String name;
+	int c_id;
 	Double time;
 	Boolean assigned;
 	List<Device> deviceList; // contains devices in a cluster
@@ -36,6 +35,17 @@ public class Cluster {
 		// t = new Thread(this, name);
 		// t.start();
 	}
+	Cluster(String tName, int id){
+		deviceList = new ArrayList<Device>();
+		tempoList = new ArrayList<Device>();
+		currentList = new ArrayList<Device>();
+		set = new HashSet<Integer>();
+		selectedDeviceList = new ArrayList<Device>();
+		unSelectedDeviceList = new ArrayList<Device>();
+		neighbourList = new ArrayList<Cluster>();
+		name = tName;
+		c_id = id;
+	}
 
 	// add the fog the cluster is attached to
 	public void addController(Device controller) {
@@ -50,6 +60,10 @@ public class Cluster {
 	// remove a device from a cluster
 	public void removeDevice(Device d) {
 		deviceList.remove(d);
+	}
+	
+	public void clearDeviceList() {
+		deviceList.clear();
 	}
 
 	// check if a device is in a cluster
@@ -127,14 +141,5 @@ public class Cluster {
 			throw new IllegalArgumentException("max must be greater than min");
 		}
 		return RANDOM.nextInt((max - min) + 1) + min;
-	}
-
-	public void sortByTime() {
-		Collections.sort(deviceList, new Comparator<Device>() {
-
-			public int compare(Device m1, Device m2) {
-				return m1.getTime().compareTo(m2.getTime());
-			}
-		});
 	}
 }

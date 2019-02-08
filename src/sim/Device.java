@@ -6,7 +6,8 @@ import java.util.List;
 public class Device implements Runnable {
 	String name;
 	int d_id;
-	Double time;
+	double time;
+	double multiplier;
 	Boolean hasJoined = false;
 	Cluster c;
 	List<Cluster> clusterList;
@@ -18,19 +19,29 @@ public class Device implements Runnable {
 		d_id = id;
 		t = new Thread(this, name);
 		t.start();
-		time = 0.0;
+		time = 0;
+	}
+	
+	Device(String tName, int id, double mult){
+		clusterList = new ArrayList<Cluster>();
+		name = tName;
+		d_id = id;
+		t = new Thread(this, name);
+		multiplier = mult;
+		t.start();
+		time = 0;
 	}
 	@Override
 	public void run() {
 		//System.out.println("I am here" + t.getName());
 	}
 	
-	public void setTime(Double time){
+	public void setTime(double time){
 		this.time = time;
 	}
 	
-	public void increaseTime(Double incr){
-		time = time + incr;
+	public void increaseTime(double i){
+		time = time + i;
 	}
 	
 	//return current machine time
@@ -51,8 +62,8 @@ public class Device implements Runnable {
 		this.c = c;
 	}
 
-	public Cluster getCluster(Device this) {
-		return c;
+	public Cluster getClusterAtTimePoint(Device this, int index) {
+		return clusterList.get(index);
 	}
 	
 	public boolean hasCluster(Device this) {
@@ -69,9 +80,4 @@ public class Device implements Runnable {
 	public boolean isJoined() {
 		return hasJoined;
 	}
-
-	public void leaveCluster(Device this) {
-		this.getCluster().removeDevice(this);
-	}
-
 }

@@ -11,17 +11,17 @@ public class Util {
 	public static class SimpleMap {
 
 		private List<Integer> keys;
-		private List<Double> values;
+		private List<Integer> values;
 
 		double a, b;
 
 		public SimpleMap() {
 			keys = new ArrayList<Integer>();
-			values = new ArrayList<Double>();
+			values = new ArrayList<Integer>();
 		}
 
 		
-		public void insert(int key, double v1) {
+		public void insert(int key, int v1) {
 			keys.add(key);
 			values.add(v1);
 		}
@@ -34,8 +34,8 @@ public class Util {
 		}
 
 
-		public double getValue(int index) {
-			return (double) values.get(index);
+		public int getValue(int index) {
+			return (int) values.get(index);
 		}
 
 		public int size() {
@@ -67,6 +67,17 @@ public class Util {
 				}
 			});
 		}
+		
+		public void sortByTime() {
+			
+				//machineList = new ArrayList<Device>();
+				Collections.sort(machineList, new Comparator<Device>() {
+
+					public int compare(Device m1, Device m2) {
+						return m1.getTime().compareTo(m2.getTime());
+					}
+				});		
+		}
 
 		public void putMachine(Device m) {
 			machineList.add(m);
@@ -97,14 +108,6 @@ public class Util {
 			return machineList.size();
 		}
 
-		public void sortByTime() {
-			Collections.sort(machineList, new Comparator<Device>() {
-
-				public int compare(Device m1, Device m2) {
-					return m1.getTime().compareTo(m2.getTime());
-				}
-			});
-		}
 	}
 	
 	public static class NewMap {

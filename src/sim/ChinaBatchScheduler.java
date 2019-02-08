@@ -10,56 +10,74 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Random;
 import java.util.Set;
 
-import map.MapProcessor;
+import china.DataExtractor;
 import map.Utility;
 
-public class CombinedScheduler extends Items {
+public class ChinaBatchScheduler extends Items {
 	static List<Cluster> initClusterList;
 	static Util.StreamMap streamMap;
 	static Utility.MyMap deviceMap;
+	static List<ArrayList<Integer>> grids;
 	static int sum;
-	static FileWriter traceWriter;
-	static String OUTFILE; 
+	static FileWriter traceWriter, fWriter;
+	static String OUTFILE;
 
-	// extract devices and grid from map processor
+	public static int failedSyncTaskCounter = 0; // counter for failed sync
+	// tasks
+	public static int total_execution_time = 0;
+	public static int quorum_quota = 0;
+	public static int prevMax = 0;
+	public static int newMax = 0;
+
+	// extract devices (index of grids) and grid data extractor
 	public static void getDetailsFromMap() throws FileNotFoundException, IOException {
-		MapProcessor.processData();
-		deviceMap = MapProcessor.assignGridsToIds();
+		// get taxi positions in list
+		grids = DataExtractor.processTraceData();
+
+		System.out.println("Done extracting map data");
+
+		// create dummy clusters
 		createClusters();
+		// create initial devices from extracted data
 		createInitDevices();
+		// get tasks from task file
+		getTasks();
 	}
 
 	public static void createClusters() {
-		for (int i = 1; i < 26; i++) {
+		System.out.println("Initializing clusters");
+		for (int i = 1; i < 500; i++) {
 			String cName = "C" + i;
 			Cluster c = new Cluster(cName, i);
+			// contains list of all 400 grids
 			initClusterList.add(c);
 		}
 	}
 
 	// create devices from ids and assign grids for all time points
 	public static void createInitDevices() throws FileNotFoundException, IOException {
-		for (int i = 0; i < deviceMap.getSize(); i++) {
-			String name = "Dev" + (deviceMap.Ids.get(i));
-			Device d = new Device(name, deviceMap.Ids.get(i));
+		System.out.println("Initializing machines");
+		for (int i = 0; i < grids.size(); i++) {
+			String name = "Dev" + (i + 1);
+			Device d = new Device(name, i + 1); // device name starting from 1
 			initMachines.add(d); // add all devices to list
 
-			List<Integer> temp = deviceMap.getGridForId(deviceMap.Ids.get(i));
+			List<Integer> temp = grids.get(i);
 
 			for (int j = 0; j < temp.size(); j++) {
 				if (temp.get(j) == 0) {
 					d.addCluster(NONE);
 				} else {
-					d.addCluster(initClusterList.get(temp.get(j) - 1));
+					d.addCluster(initClusterList.get(temp.get(j)));
 				}
 			}
 		}
 
 		// unusedDevices.forEach(d -> d.addCluster(NONE));
 		// createClusters();
-		getTasks();
 	}
 
 	// get tasks from file into custom map
@@ -78,9 +96,7 @@ public class CombinedScheduler extends Items {
 				int time = Integer.parseInt(splits[1]); // execution time
 
 				// put execution times tag and task group in map for dynamic
-				if (tag == TAG_C_ASYNC || tag == TAG_C_SYNC || tag == TAG_C_LOCAL || tag == TAG_J_LOCAL) {
-					dynamicInputMap.insert(tag, time);
-				}
+				staticInputMap.insert(tag, time);
 			}
 			// close reader
 			reader.close();
@@ -88,68 +104,77 @@ public class CombinedScheduler extends Items {
 		// createInitDevices();
 	}
 
-	public static void executeDynaSchedule() throws IOException {
+	public static void executeStaticSchedule() throws IOException {
 		getDetailsFromMap();
 		// loop through task graph in custom map
-		for (int i = 0; i < dynamicInputMap.size(); i++) {
+		for (int i = 0; i < staticInputMap.size(); i++) {
 			// check if task is local task
-			if (dynamicInputMap.getKey(i) == TAG_C_LOCAL) {
-				List<Device> noneDevices = new ArrayList<Device>();
-				noneDevices = getAsyncMachines(getCurrentTimePoint());
+			if (staticInputMap.getKey(i) == TAG_C_LOCAL || staticInputMap.getKey(i) == TAG_C_ASYNC) {
+				getMachinesN(getCurrentTimePoint());
 				// availMachineMap.sortByTime();
 				schdAsyncOrLocalC(i);
-				//dynamic_revised_available_time += dynamicInputMap.getValue(i) + 5;
-				time_point += dynamicInputMap.getValue(i);
-				for (int u = 0; u < noneDevices.size(); u++) {
-					noneDevices.get(u).increaseTime(dynamicInputMap.getValue(i));
-				}
-			}
-
-			// check if task is asynchronous task
-			else if (dynamicInputMap.getKey(i) == TAG_C_ASYNC) {
-				List<Device> noneDevices = new ArrayList<Device>();
-				// sort machine times
-				noneDevices = getAsyncMachines(getCurrentTimePoint());
-				// availMachineMap.sortByTime();
-				JNode.setTime(Math.max(getMax(), JNode.getTime()));
-				schdAsyncOrLocalC(i);
-				//dynamic_revised_available_time += dynamicInputMap.getValue(i) + COMMUNICATION_TIME + 5;
-				time_point += dynamicInputMap.getValue(i);
-				for (int u = 0; u < noneDevices.size(); u++) {
-					noneDevices.get(u).increaseTime((int) (dynamicInputMap.getValue(i) + COMMUNICATION_TIME));
+				static_available_time += staticInputMap.getValue(i) + 20;
+				System.out.println("Running task: " + (i + 1));
+				// should be changed
+				// basically for controlling devices currently not running a task
+				// * for (int u = 0; u < noneDevices.size(); u++) {
+				if (staticInputMap.getKey(i) == TAG_C_LOCAL) {
+					time_point += staticInputMap.getValue(i);
+				} else if (staticInputMap.getKey(i) == TAG_C_ASYNC) {
+					// update devices that are not part of current system
+					time_point += staticInputMap.getValue(i) + COMMUNICATION_TIME;
 				}
 			}
 
 			// check if task is C sync task
-			else if (dynamicInputMap.getKey(i) == TAG_C_SYNC) {
+			else if (staticInputMap.getKey(i) == TAG_C_SYNC) {
+				// sync task counter
 				sync_counter++;
-				List<Cluster> syncMap = new ArrayList<Cluster>();
-				List<Device> noneDevices = new ArrayList<Device>();
+				// update fog time
 				JNode.setTime(Math.max(getMax(), JNode.getTime()));
+				System.out.println("Running task: " + (i + 1));
 				System.out.println("Time point is: " + time_point);
-				// get list of clusters
-				syncMap = getSyncMachines(getCurrentTimePoint());
-				System.out.println("Size of syncMap from getSyncMachines is: " + syncMap.size());
+
+				// get unique list of clusters with associated devices
+				// syncClusterMap = getSyncMachinesSuccess(getCurrentTimePoint());
+
+				getMachinesN(getCurrentTimePoint());
+				// for debugging
+				System.out.println("Size of devices from getSyncMachines is: " + availMachineMap.getSize());
+
 				// run sync scheme
-				syncAvailUpdate(syncMap, noneDevices, time_point, i);
+				checkQuorum(readyMachines, i);
+
 				// update all devices to current point
 				// update JNode time
 				JNode.setTime(Math.max(getMax(), JNode.getTime()));
-				//dynamic_revised_available_time = Math.max(getMax(), JNode.getTime());
-				
+				// static_available_time = Math.max(getMax(), JNode.getTime());
+
 				// clear ready device list for next iteration
 				readyMachines.clear();
 				quorumCount = 0;
+				//static_available_time = Math.max(getMax(), JNode.getTime());
+				static_available_time += staticInputMap.getValue(i) + 20;
+				time_point = (Math.max(getMax(), JNode.getTime()));
 
+				for (int m = 0; m < initMachines.size(); m++) {
+					initMachines.get(m).setTime(Math.max(getMax(), JNode.getTime()));
+				}
 			}
 
 			// j local task
-			if (dynamicInputMap.getKey(i) == TAG_J_LOCAL) {
+			else if (staticInputMap.getKey(i) == TAG_UPDATE) {
+				syncAvailUpdate(i);
+			}
+
+			// j local task
+			if (staticInputMap.getKey(i) == TAG_J_LOCAL) {
 				schdLocalJ(i);
 			}
 
 			// control no of continuous runs
-			if (i == dynamicInputMap.size() - 1 && counter < (RUNS - 1)) {
+			if (i == staticInputMap.size() - 1 && counter < (RUNS - 1)) {
+
 				i = -1;
 				// System.out.println("Current run is: " + counter);
 				System.out.println("Ending run: " + (counter + 1));
@@ -157,55 +182,68 @@ public class CombinedScheduler extends Items {
 				System.out.println("Starting run: " + (counter + 2));
 				// traceWriter.write("Starting run: " + (counter + 2) + "\n");
 				counter++;
+
+				try {
+					traceWriter.write(getInitMax() + "\n");
+				} catch (Exception e) {
+					System.out.println("Could not write to output: " + e);
+				}
+
+				for (int j = 0; j < initMachines.size(); j++) {
+					// initMachines.get(j).setTime(0);
+				}
+
 			}
 		}
-
 	}
 
 	// get machines available at time point to run async task
-	public static List<Device> getAsyncMachines(int time_point) throws FileNotFoundException, IOException {
-		// List<Cluster> yesList = new ArrayList<Cluster>();
-		List<Device> noneList = new ArrayList<Device>();
+	public static void getMachinesN(int time_point) throws FileNotFoundException, IOException {
 		availMachineMap.clear();
 		for (int j = 0; j < initMachines.size(); j++) {
 			Cluster c = initMachines.get(j).getClusterAtTimePoint(time_point);
-			if (c == NONE) {
-				noneList.add(initMachines.get(j));
-			} else {
+			if (c != NONE) {
 				availMachineMap.putMachine(initMachines.get(j));
 			}
 		}
-		return noneList;
 	}
 
 	// returns unique grids with devices in them
 	public static List<Cluster> getSyncMachines(int time_point) throws FileNotFoundException, IOException {
+
 		// Set<Cluster> clusterSet = new HashSet<Cluster>();
 		List<Cluster> clusterSet = new ArrayList<Cluster>();
+		// loop through list of clusters
 		for (int i = 0; i < initClusterList.size(); i++) {
+			// empty devices in a cluster if not already empty
 			initClusterList.get(i).clearDeviceList();
 		}
 
 		for (int j = 0; j < initMachines.size(); j++) {
 
-			Cluster c = initMachines.get(j).getClusterAtTimePoint(time_point);
 			Device device = initMachines.get(j);
+			// get cluster for device at the current time point
+			Cluster c = initMachines.get(j).getClusterAtTimePoint(time_point);
+
 			if (clusterSet.contains(c) == false && c != NONE) {
+				// add only clusters with at least the minimum number of devices
 				if (c.numOfDevices() >= CLUSTER_MIN_SIZE) {
+					// add unique cluster to list
 					clusterSet.add(c);
 				}
 				// System.out.println(c.name + "added");
 			}
+			// add device to cluster device list
 			c.addDevice(device);
 		}
+
+		// for debugging
 		System.out.println("Set size is: " + clusterSet.size());
-		for (Cluster cluster : clusterSet) {
-			System.out.println("unique cluster " + cluster.name + " " + cluster.numOfDevices());
-		}
+
 		return clusterSet;
 	}
 
-	// returns unique grids with devices in them
+	// returns grids with devices in them
 	public static List<Cluster> getSyncMachinesSuccess(int time_point) throws FileNotFoundException, IOException {
 		// Set<Cluster> clusterSet = new HashSet<Cluster>();
 		List<Cluster> clusterSet = new ArrayList<Cluster>();
@@ -226,9 +264,6 @@ public class CombinedScheduler extends Items {
 			c.addDevice(device);
 		}
 		System.out.println("Set size is: " + clusterSet.size());
-		for (Cluster cluster : clusterSet) {
-			System.out.println("unique cluster " + cluster.name + " " + cluster.numOfDevices());
-		}
 		return clusterSet;
 	}
 
@@ -247,9 +282,9 @@ public class CombinedScheduler extends Items {
 
 	public static void schdLocalJ(int task_num) throws IOException {
 
-		System.out.println("Running task: " + (task_num + 1));
+		// System.out.println("Running task: " + (task_num + 1));
 		// schedule task
-		runSchedule(JNode, dynamicInputMap.getKey(task_num), dynamicInputMap.getValue(task_num));
+		runSchedule(JNode, staticInputMap.getKey(task_num), staticInputMap.getValue(task_num));
 	}
 
 	// availMachineMap contains devices currently present in the system
@@ -258,114 +293,79 @@ public class CombinedScheduler extends Items {
 	// schedule a C-async or C-local task
 	public static void schdAsyncOrLocalC(int task_num) throws IOException {
 
-		System.out.println("Running task: " + (task_num + 1));
+		// System.out.println("Running task: " + (task_num + 1));
 		// loop through available machines in the system
 		for (int k = 0; k < availMachineMap.getSize(); k++) {
 			int runtime = 0;
-			if (dynamicInputMap.getKey(task_num) == TAG_C_ASYNC) {
+			if (staticInputMap.getKey(task_num) == TAG_C_ASYNC) {
 				availMachineMap.getMachine(k).increaseTime(COMMUNICATION_TIME);
 			}
 			// generate heterogeneous runtime based on normal distribution
-			runtime = getGaussian(dynamicInputMap.getValue(task_num));
+			runtime = getGaussian(staticInputMap.getValue(task_num), (int)MULTIPLIER);
 
 			// schedule task
-			runSchedule(availMachineMap.getMachine(k), dynamicInputMap.getKey(task_num), runtime);
+			runSchedule(availMachineMap.getMachine(k), staticInputMap.getKey(task_num), runtime);
 		}
 
 	}
 
-	// dynamic_revised_available_time should be updated to the time first machine
+	// static_available_time should be updated to the time first machine
 	// shows up plus allowed delay
-	public static void syncAvailUpdate(List<Cluster> clusterMachineMap, List<Device> noneDevices, double task_num, int i)
-			throws IOException {
+	public static void syncAvailUpdate(int task_num) throws IOException {
 		quorumCount = 0;
-		numClusters = clusterMachineMap.size();
+
 		readyMachines.clear();
-		System.out.println("Total number of clusters is: " + numClusters);
-		// dynamic_revised_available_time = JNode.time;
+
 		System.out.println("Running update task");
-		for (int f = 0; f < clusterMachineMap.size(); f++) {
-			List<Device> tempDevices = new ArrayList<Device>();
+		quorum_quota = availMachineMap.getSize();
+		// available machines send update to J-machine
+		for (int j = 0; j < availMachineMap.getSize(); j++) {
+			Device dev = availMachineMap.getMachine(j);
+			// if device is early or on time go on
+			if (dev.getTime() <= static_available_time) {
+				quorumCount++;
 
-			tempDevices = clusterMachineMap.get(f).getDevices();
-
-			System.out.println("The devices under: " + clusterMachineMap.get(f).name + " are: ");
-			tempDevices.forEach(devi -> System.out.print(devi.name + ";"));
-			// tempDevices.forEach(devi -> devi.setTime(getMinOrMax()));
-			System.out.println("  ");
-
-			boolean counted = true;
-			// available machines send update to J-machine
-			for (int j = 0; j < tempDevices.size(); j++) {
-				Device dev = tempDevices.get(j);
-
-				if (dev.getTime() <= dynamic_revised_available_time) {
-					if (counted) {
-						quorumCount++;
-						counted = false;
-					}
-					// System.out.println(
-					// dev.getTime() + " was compared to " + dynamic_revised_available_time + " for
-					// " + dev.name);
-					// update fog time -- thread
-
-					JNode.setTime(Math.max(dev.getTime(), JNode.getTime()));
-					// run update sending task
-					runSchedule(dev, TAG_UPDATE, STATUS_SENDING_TIME); // ******************
-					// quorumCount++;
-					readyMachines.add(dev);
-				} else {
-					// System.out.println(
-					// dev.getTime() + " is greater than " + dynamic_revised_available_time + " for
-					// " + dev.name);
-				}
+				JNode.setTime(Math.max(dev.getTime(), JNode.getTime()));
+				// run update sending task
+				runSchedule(dev, TAG_UPDATE, STATUS_SENDING_TIME); // ******************
+				// quorumCount++;
+				readyMachines.add(dev);
+				
+				
 			}
-			tempDevices.clear();
 		}
-
-		for (Device ddd : noneDevices) {
-			ddd.increaseTime(STATUS_SENDING_TIME);
-		}
-		// System.out.println("Fog time is: " + JNode.getTime());
+		System.out.println("Size of readyMachines: " + readyMachines.size());
+		//static_available_time += STATUS_SENDING_TIME;
+		static_available_time += (readyMachines.size() * STATUS_PROCESSING_TIME);
 
 		// update device time to latest finish
 		for (int h = 0; h < readyMachines.size(); h++) {
 			readyMachines.get(h).setTime(Math.max(getReadyMax(), JNode.getTime()));
+			JNode.setTime(Math.max(getReadyMax(), JNode.getTime()));
 		}
-		//time_point += 1;
-		checkQuorum(clusterMachineMap, readyMachines, noneDevices, i);
+		// time_point += 1;
 
 	}
 
 	// check if at least a device per cluster sent update message
-	public static void checkQuorum(List<Cluster> clusterMachineMap, List<Device> readyDevices, List<Device> noneDevices,
-			int task_num) throws IOException {
+	public static void checkQuorum(List<Device> readyDevices, int task_num) throws IOException {
 		System.out.println("Checking for quorum");
 		// run quorum for ready machines
 		for (int g = 0; g < readyDevices.size(); g++) {
 			// schedule quorum task
 			runSchedule(readyDevices.get(g), TAG_QUORUM, QUORUM_TIME);
 		}
-		// time_point += 1;
-		// update all machine time?????? WHY THIS????
-		for (int j = 0; j < availMachineMap.getSize(); j++) {
-			if (availMachineMap.getMachine(j).getTime() <= getReadyMax()) {
-				availMachineMap.getMachine(j).setTime(getReadyMax());
+		static_available_time += QUORUM_TIME;
+
+		if (quorum_attempts < QUORUM_RETRIES) {
+			if (isQuorumNew()) {
+				scheduleSync(readyDevices, task_num);
+			} else {
+				System.out.println("Attempting quorum again");
+				static_available_time += LAMBDA;
+				retryQuorum(readyDevices, task_num);
+
 			}
-		}
-
-		// update machine times after quorum
-		for (int h = 0; h < readyDevices.size(); h++) {
-			// schedule quorum task
-			readyDevices.get(h).setTime(Math.max(getReadyMax(), JNode.getTime()));
-		}
-
-		for (Device ddd : noneDevices) {
-			ddd.setTime(Math.max(getReadyMax(), JNode.getTime()));
-		}
-
-		if (isQuorum()) {
-			scheduleSync(clusterMachineMap, readyDevices, noneDevices, task_num);
 		} else {
 			System.out.println("Sync task failed due to failed quorum, task number: " + (task_num + 1));
 			syncFail++;
@@ -373,10 +373,15 @@ public class CombinedScheduler extends Items {
 		}
 	}
 
+	public static void retryQuorum(List<Device> readyDevices, int task_num) throws IOException {
+		System.out.println("Retrying quorum no: " + (quorum_attempts + 1));
+		quorum_attempts++; // increment attempts
+		total_quorum_attempts++; // total quorum attempts
+		syncAvailUpdate(task_num);
+	}
+
 	// if quorum successful go ahead and run sync task
-	public static void scheduleSync(List<Cluster> clusterMachineMap, List<Device> runDevices, List<Device> noneDevices,
-			int task_num) throws IOException {
-		time_point += dynamicInputMap.getValue(task_num);
+	public static void scheduleSync(List<Device> runDevices, int task_num) throws IOException {
 
 		System.out.println("Quorum successful!!!!!");
 
@@ -384,25 +389,15 @@ public class CombinedScheduler extends Items {
 			// update device times
 			runDevices.get(h).setTime(Math.max(getReadyMax(), JNode.getTime()));
 		}
-		System.out.println("Running task: " + (task_num + 1));
+		System.out.println("Running sync task with id: " + (task_num + 1));
 		// schedule sync task
 		for (int z = 0; z < runDevices.size(); z++) {
 			runDevices.get(z).increaseTime(COMMUNICATION_TIME);
 			// ready machines should be in sync at this point
-			runSchedule(runDevices.get(z), TAG_C_SYNC, getGaussian(dynamicInputMap.getValue(task_num)));
+			runSchedule(runDevices.get(z), TAG_C_SYNC, getGaussian(staticInputMap.getValue(task_num), (int)MULTIPLIER));
 		}
-
-		for (Device ddd : noneDevices) {
-			ddd.increaseTime(dynamicInputMap.getValue(task_num));
-		}
-
-		if (checkSyncSuccessNew(clusterMachineMap)) {
-			System.out.println("Sync task successfully completed");
-			syncSuccess++;
-		} else {
-			System.out.println("Sync task execution failed");
-			syncFail++;
-		}
+		time_point = Math.max(getReadyMax(), JNode.getTime());
+		System.out.println("Sync task successfully completed");
 	}
 
 	// check for quorum by comparing size of machines with update count
@@ -411,6 +406,17 @@ public class CombinedScheduler extends Items {
 			return true;
 		else {
 			System.out.println("Expected: " + numClusters + " got: " + quorumCount);
+			return false;
+		}
+	}
+
+	// check for quorum by comparing size of machines with update count
+	public static boolean isQuorumNew() {
+		if (quorumCount >= (int) (quorum_quota * 0.7)) {
+			System.out.println("Compared: " + (int) (quorum_quota * 0.7) + " to " + quorumCount);
+			return true;
+		} else {
+			System.out.println("Expected: " + (int) (quorum_quota * 0.7) + " got: " + quorumCount);
 			return false;
 		}
 	}
@@ -452,7 +458,16 @@ public class CombinedScheduler extends Items {
 			JNode.increaseTime(runtime);
 		}
 		// update J-machine time and save to file
-		else {
+
+		// ****************** change here
+		else if (task_type == 5) {
+			m.increaseTime(runtime);
+			// JNode.setTime(m.getTime());
+			// if (task_type == 5)
+			JNode.increaseTime(STATUS_PROCESSING_TIME);
+			// else if (task_type == 6)
+			// JNode.increaseTime(QUORUM_PROCESSING_TIME);
+		} else {
 			m.increaseTime(runtime);
 			// JNode.setTime(m.getTime());
 			// if (task_type == 5)
@@ -508,8 +523,9 @@ public class CombinedScheduler extends Items {
 		// get list of clusters at current time point
 		System.out.println("Time point is: " + time_point);
 		syncMap = getSyncMachines(getCurrentTimePoint());
-		for (int i = 0; i < syncMap.size(); i ++) {
-			tempDevices = syncMap.get(i).getDevices();;
+		for (int i = 0; i < syncMap.size(); i++) {
+			tempDevices = syncMap.get(i).getDevices();
+			;
 			System.out.println("The devices under: " + syncMap.get(i).name + " are: ");
 			tempDevices.forEach(devi -> System.out.print(devi.name + ";"));
 			// tempDevices.forEach(devi -> devi.setTime(getMinOrMax()));
@@ -524,7 +540,37 @@ public class CombinedScheduler extends Items {
 	}
 
 	public static int getCurrentTimePoint() {
-		return (int)time_point;
+
+		if (time_point >= 5000) {
+			time_point = 0;
+			return (int) time_point;
+		}
+		else
+			return (int) time_point;
+	}
+
+	public static Random fRandom = new Random();
+
+	public static int getGaussian(double aMean, int opt) {
+		double time = 0;
+		switch (opt) {
+		case 0:
+			time = aMean;
+			break;
+		case 1:
+			time = aMean + fRandom.nextGaussian() * 5;
+			break;
+		case 2:
+			time = aMean + fRandom.nextGaussian() * 10;
+			break;
+		case 3:
+			time = aMean + fRandom.nextGaussian() * 15;
+			break;
+		case 4:
+			time = aMean + fRandom.nextGaussian() * 20;
+			break;
+		}
+		return (int) time;
 	}
 
 	public static int getGaussian(double aMean) {
@@ -546,25 +592,6 @@ public class CombinedScheduler extends Items {
 		return max;
 	}
 
-	// randomly disable some machines to simulate machine failure.
-	public static void randomFail() throws IOException {
-
-		// loop through
-		for (int j = 0; j < availMachineMap.getSize(); j++) {
-			if (Math.random() < DECISION) {
-				// let failure occur for each machine at a probability of 0.1
-				if (Math.random() < 0.05) {
-					failed_machines_counter++;
-					Device mach = availMachineMap.getMachine(j);
-					System.out.println("Device failed: " + mach.name);
-					// traceWriter.write("Device failed: " + mach.name + "\n");
-					// remove machine from available list
-					availMachineMap.removeMachine(mach);
-				}
-			}
-		}
-	}
-
 	public static int getMax() {
 		int max = 0;
 		// System.out.println("Total machines = " + availMachineMap.getSize());
@@ -576,72 +603,94 @@ public class CombinedScheduler extends Items {
 		return max;
 	}
 
-	public static void runDynamic() throws IOException {
-		executeDynaSchedule();
-		generateDynamicOutput();
+	public static int getInitMax() {
+		int max = 0;
+		// System.out.println("Total machines = " + availMachineMap.getSize());
+		for (int i = 0; i < initMachines.size(); i++) {
+			// System.out.println("machine time = " +
+			// availMachineMap.getMachine(i).getTime());
+			max = (int) Math.max(max, initMachines.get(i).getTime());
+		}
+		return max;
 	}
 
+	public static void runStatic() throws IOException {
+		executeStaticSchedule();
+		generateStaticOutput();
+	}
+
+	public static void processResult() throws FileNotFoundException, IOException {
+		fWriter = new FileWriter("chinaDyna.txt", true);
+		List<Integer> values = new ArrayList<>();
+		values.add(0);
+		try (BufferedReader br = new BufferedReader(new FileReader("chinaDynaOut.txt"))) {
+
+			String sCurrentLine;
+			while ((sCurrentLine = br.readLine()) != null) {
+				// remove trailing spaces
+				sCurrentLine = sCurrentLine.trim();
+
+				// get values from each line
+				int prev = Integer.parseInt(sCurrentLine); // task id
+				values.add(prev);
+			}
+			// close reader
+			br.close();
+			System.out.println("Done");
+		}
+		//int prev = 0;
+		System.out.println(values.size());
+		for (int q = 0; q < values.size(); q++) {
+			
+			if ((q + 1) < values.size()) {
+
+				int prev = values.get(q);
+				int curr = values.get(q + 1);
+				int upload = (curr - prev) / 7;
+				System.out.println(upload);
+				
+
+				try {
+					fWriter.write(String.valueOf(upload) + "\n");
+				} catch (Exception e) {
+					System.out.println("Could not write to output: " + e);
+				}
+			}
+
+		}
+
+	}
 	// generate final output and trace
-	public static void generateDynamicOutput() throws IOException {
+	public static void generateStaticOutput() throws IOException {
 
 		System.out
 				.println("==========================================================================================");
-		System.out.println("Starting dynamic scheduling report...................... ");
+		System.out.println("Starting static scheduling report...................... ");
 		System.out
 				.println("==========================================================================================");
 		System.out.println("Totl no of sync tasks: " + sync_counter);
 		System.out.println("No of runs: " + RUNS);
-		System.out.println("No of tasks: " + dynamicInputMap.size());
+		System.out.println("No of tasks: " + (staticInputMap.size() * RUNS));
 		System.out.println("Total time: " + getMax());
 		System.out.println("Failed sync tasks: " + syncFail);
+		System.out.println("Extra quorum attempts: " + total_quorum_attempts);
 		System.out.println(
 				"============================================================================================");
-		System.out.println("End of dynamic scheduling report");
+		System.out.println("End of static scheduling report");
 		System.out.println(
 				"============================================================================================");
-		
-		Double p = (double) syncFail/(double) sync_counter * 100;
-		
+
+		// Double p = (double) syncFail / (double) sync_counter * 100;
+
 		try {
-			traceWriter.write(p +"\n");
-		}catch(Exception e) {
-			System.out.println("Could not write to output: " + e); 
+			traceWriter.write(getInitMax() + "\n");
+		} catch (Exception e) {
+			System.out.println("Could not write to output: " + e);
 		}
 
 		// fileWriter.write(df.format(getMax()) + " " + df.format(sync_delay) + " "
 		// + (total_quorum_attempts + sync_task_counter) + " " + failedSyncTaskCounter +
 		// "\n");
-	}
-
-	public static void main(String[] args) throws FileNotFoundException, IOException {
-
-		try {
-			CLUSTER_MIN_SIZE = Integer.parseInt(args[0]);
-			OUTFILE = args[1];
-		} catch (Exception e) {
-			System.out.println("Invalid input(s)");
-		}
-		traceWriter = new FileWriter(OUTFILE, true);
-		initClusterList = new ArrayList<Cluster>();
-		streamMap = new Util.StreamMap();
-		deviceMap = new Utility.MyMap();
-		dynamicInputMap = new Util.SimpleMap(); // holds tasks
-		mobilityPattern = new Util.StreamMap();
-		JNode = new Device("JNode", 1);
-		unsortedMachineMap = new Util.MachineMap<Device>();
-		availMachineMap = new Util.MachineMap<Device>();
-		readyMachines = new ArrayList<Device>();
-		initMachines = new ArrayList<Device>();
-		assignedMachines = new ArrayList<Device>();
-		unusedMachines = new ArrayList<Device>();
-		neighbourList = new ArrayList<Device>();
-		unusedDevices = new HashSet<Device>();
-		
-		
-		System.out.println("Starting simulation....");
-		runDynamic();
-		System.out.println("Simulation ended");
-		traceWriter.close();
 	}
 
 	// miscellaneous methods
@@ -681,6 +730,41 @@ public class CombinedScheduler extends Items {
 		List<Cluster> convertedList = new ArrayList<Cluster>();
 		hash.forEach(d -> convertedList.add(d));
 		return convertedList;
+	}
+
+	public static void main(String[] args) throws FileNotFoundException, IOException {
+
+		/*
+		 * try { CLUSTER_MIN_SIZE = Integer.parseInt(args[0]); OUTFILE = args[1]; }
+		 * catch (Exception e) { System.out.println("Invalid input(s)"); }
+		 */
+		traceWriter = new FileWriter("chinaDynaOut.txt", true);
+		fWriter = new FileWriter("chinaDyna.txt", true);
+		initClusterList = new ArrayList<Cluster>();
+		streamMap = new Util.StreamMap();
+		deviceMap = new Utility.MyMap();
+		staticInputMap = new Util.SimpleMap(); // holds tasks
+		mobilityPattern = new Util.StreamMap();
+		JNode = new Device("JNode", 1);
+		unsortedMachineMap = new Util.MachineMap<Device>();
+		availMachineMap = new Util.MachineMap<Device>();
+		readyMachines = new ArrayList<Device>();
+		initMachines = new ArrayList<Device>();
+		assignedMachines = new ArrayList<Device>();
+		unusedMachines = new ArrayList<Device>();
+		neighbourList = new ArrayList<Device>();
+		unusedDevices = new HashSet<Device>();
+
+		grids = new ArrayList<ArrayList<Integer>>();
+
+		runStatic();
+		// processResult();
+		System.out.println("Simulation ended");
+		traceWriter.close();
+		processResult();
+		fWriter.close();
+		System.out.println("Starting simulation....");
+
 	}
 
 }
