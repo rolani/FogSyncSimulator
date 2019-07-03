@@ -1,3 +1,5 @@
+// this class implememts DSSA with component redundancy
+
 package sim;
 
 import java.io.BufferedReader;

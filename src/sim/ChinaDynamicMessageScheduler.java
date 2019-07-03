@@ -280,7 +280,6 @@ public class ChinaDynamicMessageScheduler extends Items {
 		syncMap = getSyncMachines(getCurrentTimePoint());
 		for (int i = 0; i < syncMap.size(); i++) {
 			tempDevices = syncMap.get(i).getDevices();
-			;
 			System.out.println("The devices under: " + syncMap.get(i).name + " are: ");
 			tempDevices.forEach(devi -> System.out.print(devi.name + ";"));
 			// tempDevices.forEach(devi -> devi.setTime(getMinOrMax()));
@@ -293,7 +292,7 @@ public class ChinaDynamicMessageScheduler extends Items {
 			return false;
 		}
 	}
-	
+
 	// run tasks and update time
 	public static void runSchedule(Device m, int task_type, int runtime) throws IOException {
 
@@ -337,7 +336,7 @@ public class ChinaDynamicMessageScheduler extends Items {
 			m.increaseTime(runtime);
 			// JNode.setTime(m.getTime());
 			// if (message_count < INIT_DEVICES) {
-			//JNode.increaseTime(STATUS_PROCESSING_TIME);
+			// JNode.increaseTime(STATUS_PROCESSING_TIME);
 			// message_count++;
 			// }
 			// else if (task_type == 6)
@@ -347,7 +346,7 @@ public class ChinaDynamicMessageScheduler extends Items {
 			// JNode.setTime(m.getTime());
 			// if (task_type == 5)
 			// if (message_count < INIT_DEVICES) {
-			//JNode.increaseTime(QUORUM_PROCESSING_TIME);
+			// JNode.increaseTime(QUORUM_PROCESSING_TIME);
 			// message_count++;
 			// }
 			// else if (task_type == 6)
